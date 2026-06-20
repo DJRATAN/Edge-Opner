@@ -1,5 +1,5 @@
 @echo off
-title Manual User Switcher (No Restart)
+title Manual User Switcher
 cls
 
 REM ====================================================
@@ -18,13 +18,52 @@ pushd "%CD%"
 CD /D "%~dp0"
 
 REM ====================================================
-REM  2. USER SELECTION MENU
+REM  2. MAIN MENU
 REM ====================================================
-:MENU
+:MAIN_MENU
 cls
 echo.
 echo ==============================================
-echo    SELECT USER TO SWITCH TO (NO RESTART)
+echo              MAIN MENU
+echo ==============================================
+echo.
+echo 1 - Set boot user and SHUT DOWN PC
+echo 2 - Switch user immediately (LOG OFF)
+echo.
+set /p main_choice=Enter choice (1-2): 
+
+if "%main_choice%"=="1" (
+    call :SELECT_USER
+    call :APPLY_REGISTRY
+    echo.
+    echo Shutting down PC in 5 seconds...
+    timeout /t 5 >nul
+    shutdown /s /f /t 0
+    exit /B
+)
+if "%main_choice%"=="2" (
+    call :SELECT_USER
+    call :APPLY_REGISTRY
+    echo.
+    echo Switching user in 3 seconds...
+    timeout /t 3 >nul
+    shutdown /l /f
+    exit /B
+)
+
+echo.
+echo Invalid choice! Please select 1 or 2.
+timeout /t 2 >nul
+goto MAIN_MENU
+
+REM ====================================================
+REM  3. SELECT USER ROUTINE
+REM ====================================================
+:SELECT_USER
+cls
+echo.
+echo ==============================================
+echo    SELECT USER TO CONFIGURE
 echo ==============================================
 echo.
 echo 1  - radhamay_ratanA       9  - radhamay_ratanI
@@ -36,7 +75,6 @@ echo 6  - radhamay_ratanF       14 - radhamay_ratanN
 echo 7  - radhamay_ratanG       15 - radhamay_ratanO
 echo 8  - radhamay_ratanH
 echo.
-
 set /p id=Enter number (1-15): 
 
 set username=
@@ -56,42 +94,24 @@ if "%id%"=="13" set username=radhamay_ratanM
 if "%id%"=="14" set username=radhamay_ratanN
 if "%id%"=="15" set username=radhamay_ratanO
 
-REM Check if input was valid
 if "%username%"=="" (
     echo.
     echo Invalid selection! Please try again.
     timeout /t 2 >nul
-    goto MENU
+    goto SELECT_USER
 )
+goto :EOF
 
 REM ====================================================
-REM  3. CONFIGURE REGISTRY FOR AUTO LOGIN
+REM  4. APPLY REGISTRY ROUTINE
 REM ====================================================
+:APPLY_REGISTRY
 echo.
 echo Configuring AutoLogon for user: %username%...
 
-REM Set the Username
 reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v DefaultUserName /t REG_SZ /d "%username%" /f
-
-REM Set the Password
 reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v DefaultPassword /t REG_SZ /d "Radhe" /f
-
-REM Set Computer Name as Domain (Fixes login errors)
 reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v DefaultDomainName /t REG_SZ /d "%COMPUTERNAME%" /f
-
-REM Enable Auto Logon
 reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v AutoAdminLogon /t REG_SZ /d 1 /f
-
-REM Force Auto Logon (Crucial for Logoff vs Restart)
-REM This ensures it doesn't get stuck on the Lock Screen
 reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v ForceAutoLogon /t REG_SZ /d 1 /f
-
-REM ====================================================
-REM  4. LOG OFF (NO RESTART)
-REM ====================================================
-echo.
-echo Switching user in 3 seconds...
-timeout /t 3 >nul
-
-REM /l = Logoff, /f = Force close applications
-shutdown /l /f
+goto :EOF
