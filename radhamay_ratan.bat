@@ -22,16 +22,29 @@ set "LAST_USER=radhamay_ratanO"
 net session >nul 2>&1
 if "!errorlevel!" NEQ "0" (
     echo Elevating privileges to Administrator...
-    powershell -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+    echo Set UAC = CreateObject^("Shell.Application"^) > "%temp%\getadmin.vbs"
+    echo UAC.ShellExecute "%~s0", "ELEVATED", "", "runas", 1 >> "%temp%\getadmin.vbs"
+    "%temp%\getadmin.vbs"
     exit /b
 )
+if exist "%temp%\getadmin.vbs" ( del "%temp%\getadmin.vbs" )
+
+echo [%TIME%] Script started as Admin > C:\debug_log.txt
+if exist "%temp%\getadmin.vbs" ( del "%temp%\getadmin.vbs" )
 
 :: Note: On Windows 10 Lite, automatic shortcut creation often fails.
 :: If you want the script to run on startup, manually place a shortcut 
 :: of this batch file into: %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup
 
-:: Get current Windows username
+:: Get the actual logged-in Windows username (even if running elevated)
 set "CURRENT_USER=%USERNAME%"
+echo [%TIME%] USERNAME env var is: %USERNAME% >> C:\debug_log.txt
+for /f "delims=" %%A in ('powershell -NoProfile -Command "(Get-WmiObject -Class Win32_ComputerSystem).UserName.Split('\')[1]" 2^>nul') do (
+    set "temp_user=%%A"
+    set "temp_user=!temp_user: =!"
+    set "CURRENT_USER=!temp_user!"
+)
+echo [%TIME%] Detected CURRENT_USER: !CURRENT_USER! >> C:\debug_log.txt
 
 :: Retrieve local and public IP addresses
 set "LOCAL_IP=Unknown"
@@ -45,6 +58,19 @@ for /f "tokens=2 delims=:" %%A in ('ipconfig ^| findstr /i "ipv4"') do (
 set "PUBLIC_IP=Unknown"
 for /f "delims=" %%A in ('curl -s --max-time 3 https://api.ipify.org 2^>nul') do set "PUBLIC_IP=%%A"
 
+:: Retrieve MAC (Physical) Address
+set "MAC_ADDRESS=Unknown"
+for /f "tokens=1,2 delims=," %%A in ('getmac /fo csv /nh 2^>nul') do (
+    set "transport=%%~B"
+    if not "!transport!"=="Media disconnected" (
+        if "!MAC_ADDRESS!"=="Unknown" set "MAC_ADDRESS=%%~A"
+    )
+)
+if "!MAC_ADDRESS!"=="Unknown" (
+    for /f "tokens=1 delims=," %%A in ('getmac /fo csv /nh 2^>nul') do (
+        if "!MAC_ADDRESS!"=="Unknown" set "MAC_ADDRESS=%%~A"
+    )
+)
 :: Retrieve AnyDesk ID
 set "ANYDESK_ID=Unknown"
 if exist "%ProgramData%\AnyDesk\system.conf" (
@@ -85,6 +111,7 @@ for /L %%U in (1,1,%TOTAL_USERS%) do (
 )
 
 if "!user_idx!"=="0" (
+    echo [%TIME%] ERROR: Unrecognized User. Halting. >> C:\debug_log.txt
     echo ==============================================================
     echo [ERROR] Unrecognized User
     echo.
@@ -95,6 +122,34 @@ if "!user_idx!"=="0" (
     pause
     exit /b
 )
+
+echo [%TIME%] Found user index: !user_idx! >> C:\debug_log.txt
+
+:: Check if this user has already completed everything today
+echo [%TIME%] Checking completion log for !CURRENT_USER!... >> C:\debug_log.txt
+if exist "C:\user_completion_log.txt" (
+    findstr /I /C:"!CURRENT_USER! completed all profiles at !date!" "C:\user_completion_log.txt" >nul
+    if "!errorlevel!"=="0" (
+        echo [%TIME%] User already completed today. Skipping. >> C:\debug_log.txt
+        echo.
+        echo ========================================================
+        echo !CURRENT_USER! has already completed all profiles today - !date!
+        echo ========================================================
+        echo.
+        echo Will automatically switch to the next user in 5 minutes...
+        echo.
+        choice /c SC /t 300 /d S /m "Press S to switch now, or C to Cancel (close script)"
+        if "!errorlevel!"=="2" (
+            echo.
+            echo Canceling auto-switch. Exiting script...
+            exit /b
+        )
+        echo.
+        echo Skipping to next user...
+        goto DETERMINE_NEXT_USER
+    )
+)
+echo [%TIME%] Starting profile loop for !CURRENT_USER! >> C:\debug_log.txt
 
 :: Define this user's data file (e.g., C:\radhamay_ratanC_complete.txt)
 set "DATA_FILE=C:\!CURRENT_USER!_complete.txt"
@@ -157,6 +212,7 @@ for /L %%N in (1,1,%TOTAL_PROFILES%) do (
 echo !CURRENT_USER! completed all profiles at !date! !time! >> C:\user_completion_log.txt
 del "!DATA_FILE!" >nul 2>&1
 
+:DETERMINE_NEXT_USER
 :: Determine next user
 if /I "!CURRENT_USER!"=="!LAST_USER!" (
     set next_idx=1
@@ -195,8 +251,14 @@ if "!is_last_user!"=="1" (
     if not "%TELEGRAM_BOT_TOKEN%"=="YOUR_BOT_TOKEN_HERE" if not "%TELEGRAM_BOT_TOKEN%"=="" (
         if not "%TELEGRAM_CHAT_ID%"=="YOUR_CHAT_ID_HERE" if not "%TELEGRAM_CHAT_ID%"=="" (
             echo Sending Telegram notification...
-            set "MSG=------ Radhe Radhe ------%%0AAll users (A to !LAST_USER:~-1!) have successfully completed today's data run. The PC is shutting down now.%%0A%%0AIP Address: Local: !LOCAL_IP! | Public: !PUBLIC_IP!%%0AAnyDesk IP: !ANYDESK_ID!%%0A%%0ADate: !date!%%0ATime: !time!"
+            set "MSG=------ Radhe Radhe ------%%0AAll users (A to !LAST_USER:~-1!) have successfully completed today's data run. The PC is shutting down now.%%0A%%0AIP Address: Local: !LOCAL_IP! | Public: !PUBLIC_IP!%%0AAnyDesk IP: !ANYDESK_ID!%%0AMAC (Physical): !MAC_ADDRESS!%%0A%%0ADate: !date!%%0ATime: !time!"
             curl -s -X POST "https://api.telegram.org/bot%TELEGRAM_BOT_TOKEN%/sendMessage" -d "chat_id=%TELEGRAM_CHAT_ID%" -d "text=!MSG!" >nul 2>&1
+            
+            :: Send completion log file
+            if exist "C:\user_completion_log.txt" (
+                echo Sending completion log file...
+                curl -s -X POST "https://api.telegram.org/bot%TELEGRAM_BOT_TOKEN%/sendDocument" -F "chat_id=%TELEGRAM_CHAT_ID%" -F "document=@C:\user_completion_log.txt" >nul 2>&1
+            )
         )
     )
     
@@ -252,6 +314,7 @@ for /L %%I in (1,1,200) do (
             echo Current User:  !user!
             echo IP Address:    Local: !LOCAL_IP! ^| Public: !PUBLIC_IP!
             echo AnyDesk IP:    !ANYDESK_ID!
+            echo MAC Address:   !MAC_ADDRESS!
             echo Running:       !profile!
             echo.
             echo Completed:     !COMPLETED_LIST!
