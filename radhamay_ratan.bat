@@ -130,25 +130,42 @@ echo [%TIME%] Checking completion log for !CURRENT_USER!... >> C:\debug_log.txt
 if exist "C:\user_completion_log.txt" (
     findstr /I /C:"!CURRENT_USER! completed all profiles at !date!" "C:\user_completion_log.txt" >nul
     if "!errorlevel!"=="0" (
-        echo [%TIME%] User already completed today. Skipping. >> C:\debug_log.txt
-        echo.
-        echo ========================================================
-        echo !CURRENT_USER! has already completed all profiles today - !date!
-        echo ========================================================
-        echo.
-        echo Will automatically switch to the next user in 5 minutes...
-        echo.
-        choice /c SC /t 300 /d S /m "Press S to switch now, or C to Cancel (close script)"
-        if "!errorlevel!"=="2" (
-            echo.
-            echo Canceling auto-switch. Exiting script...
-            exit /b
-        )
-        echo.
-        echo Skipping to next user...
-        goto DETERMINE_NEXT_USER
+        goto WAIT_SKIP
     )
 )
+goto START_PROFILES
+
+:WAIT_SKIP
+set "wait_time=300"
+:WAIT_LOOP
+cls
+echo ========================================================
+echo !CURRENT_USER! has already completed all profiles today - !date!
+echo ========================================================
+echo.
+echo Will automatically switch to the next user in !wait_time! seconds...
+echo.
+echo Press [S] to Switch now
+echo Press [C] to Cancel (close script)
+choice /c SCX /n /t 1 /d X >nul
+if "!errorlevel!"=="2" (
+    echo.
+    echo Canceling auto-switch. Exiting script...
+    exit /b
+)
+if "!errorlevel!"=="1" (
+    echo.
+    echo Skipping to next user...
+    goto DETERMINE_NEXT_USER
+)
+set /a wait_time-=1
+if !wait_time! GTR 0 goto WAIT_LOOP
+
+echo.
+echo Skipping to next user...
+goto DETERMINE_NEXT_USER
+
+:START_PROFILES
 echo [%TIME%] Starting profile loop for !CURRENT_USER! >> C:\debug_log.txt
 
 :: Define this user's data file (e.g., C:\radhamay_ratanC_complete.txt)
